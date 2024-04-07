@@ -18,8 +18,10 @@ from .accumulator import Accumulator
 from .utils import to_image
 from .ema import EMA
 
+
 def has_int_squareroot(num):
     return (math.sqrt(num) ** 2) == num
+
 
 def num_to_groups(num, divisor):
     groups = num // divisor
@@ -29,28 +31,29 @@ def num_to_groups(num, divisor):
         arr.append(remainder)
     return arr
 
+
 class Trainer(object):
     def __init__(
-        self,
-        diffusion_model,
-        folder_or_dataset,
-        *,
-        train_batch_size = 16,
-        gradient_accumulate_every = 1,
-        augment_horizontal_flip = True,
-        train_lr = 1e-4,
-        train_num_steps = 100000,
-        ema_update_every = 10,
-        ema_decay = 0.995,
-        adam_betas = (0.9, 0.99),
-        save_and_sample_every = 1000,
-        num_samples = 25,
-        results_folder = './results',
-        amp_level = 'O1',
-        dynamic_loss_scale = False,
-        jit = True,
-        akg = True,
-        distributed = False,
+            self,
+            diffusion_model,
+            folder_or_dataset,
+            *,
+            train_batch_size=16,
+            gradient_accumulate_every=1,
+            augment_horizontal_flip=True,
+            train_lr=1e-4,
+            train_num_steps=100000,
+            ema_update_every=10,
+            ema_decay=0.995,
+            adam_betas=(0.9, 0.99),
+            save_and_sample_every=1000,
+            num_samples=25,
+            results_folder='./results',
+            amp_level='O1',
+            dynamic_loss_scale=False,
+            jit=True,
+            akg=True,
+            distributed=False,
     ):
         super().__init__()
         device_id = int(os.getenv('DEVICE_ID', "0"))
@@ -72,10 +75,10 @@ class Trainer(object):
 
         self.is_main_process = True if rank_id == 0 else False
         if self.is_main_process:
-            self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
+            self.ema = EMA(diffusion_model, beta=ema_decay, update_every=ema_update_every)
 
             self.results_folder = Path(results_folder)
-            self.results_folder.mkdir(exist_ok = True)
+            self.results_folder.mkdir(exist_ok=True)
 
         assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
         self.num_samples = num_samples
@@ -88,12 +91,15 @@ class Trainer(object):
 
         # dataset and dataloader
         if isinstance(folder_or_dataset, str):
-            self.ds = create_dataset(folder_or_dataset, self.image_size, augment_horizontal_flip=augment_horizontal_flip, \
-                batch_size=train_batch_size, num_shards=rank_size, shard_id=rank_id, shuffle=True, drop_remainder=True)
+            self.ds = create_dataset(folder_or_dataset, self.image_size,
+                                     augment_horizontal_flip=augment_horizontal_flip,
+                                     batch_size=train_batch_size, num_shards=rank_size, shard_id=rank_id, shuffle=True,
+                                     drop_remainder=True)
         elif isinstance(folder_or_dataset, (VisionBaseDataset, GeneratorDataset, MindDataset)):
             self.ds = folder_or_dataset
         else:
-            raise ValueError(f"the value of 'folder_or_dataset' should be a str or Dataset, but get {folder_or_dataset}.")
+            raise ValueError(
+                f"the value of 'folder_or_dataset' should be a str or Dataset, but get {folder_or_dataset}.")
         dataset_size = self.ds.get_dataset_size()
         self.ds = self.ds.repeat(int(train_num_steps * gradient_accumulate_every // dataset_size) + 1)
         # optimizer
@@ -186,7 +192,7 @@ class Trainer(object):
             train_step = ms_function(train_step)
 
         data_iterator = self.ds.create_tuple_iterator()
-        with tqdm(initial = self.step, total = self.train_num_steps, disable = not self.is_main_process) as pbar:
+        with tqdm(initial=self.step, total=self.train_num_steps, disable=not self.is_main_process) as pbar:
             total_loss = 0.
             for (data,) in data_iterator:
                 model.set_train()
@@ -209,9 +215,8 @@ class Trainer(object):
                     accumulate_step = self.step // self.gradient_accumulate_every
                     accumulate_remain_step = self.step % self.gradient_accumulate_every
                     if accumulate_step != 0 and \
-                        accumulate_step % self.save_and_sample_every == 0 and \
-                        accumulate_remain_step == (self.gradient_accumulate_every - 1):
-
+                            accumulate_step % self.save_and_sample_every == 0 and \
+                            accumulate_remain_step == (self.gradient_accumulate_every - 1):
                         self.ema.set_train(False)
                         # model -> swap, ema -> model
                         self.ema.synchronize()
@@ -219,8 +224,9 @@ class Trainer(object):
                         batches = num_to_groups(self.num_samples, self.batch_size)
                         all_images_list = list(map(lambda n: self.ema.online_model.sample(batch_size=n), batches))
 
-                        all_images = np.concatenate(all_images_list, axis = 0)
-                        to_image(all_images, str(self.results_folder + f'/sample-{accumulate_step}.png'), nrow = int(math.sqrt(self.num_samples)))
+                        all_images = np.concatenate(all_images_list, axis=0)
+                        to_image(all_images, str(self.results_folder + f'/sample-{accumulate_step}.png'),
+                                 nrow=int(math.sqrt(self.num_samples)))
 
                         # save ckpt(ema params)
                         self.save(accumulate_step)
